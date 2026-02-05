@@ -1,57 +1,40 @@
-name: Full-Auto Android VBox
+name: Docker Android Stable
 on: workflow_dispatch
 
 jobs:
   android:
-    runs-on: macos-13 # VirtualBox-এর জন্য এটিই সবচেয়ে স্টেবল
+    runs-on: ubuntu-latest
     steps:
       - name: 🌐 Connect Tailscale
-        run: |
-          brew install tailscale
-          sudo tailscaled --tun=userspace-networking &
-          sleep 5
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-android-vbox
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          args: --hostname=docker-android
 
-      - name: 💿 Download & Setup VM
+      - name: 🐳 Start Docker Android
         run: |
-          # অ্যান্ড্রয়েড ISO ডাউনলোড
-          curl -L -o android.iso "https://sourceforge.net/projects/android-x86/files/Release%209.0/android-x86_64-9.0-r2.iso/download"
-          
-          # ভার্চুয়াল বক্স কনফিগারেশন
-          VBoxManage createvm --name "AndroidVM" --ostype "Linux26_64" --register
-          VBoxManage modifyvm "AndroidVM" --memory 4096 --vram 128 --cpus 2 --graphicscontroller vmsvga --nic1 nat
-          
-          # স্টোরেজ এবং পাসওয়ার্ড সেটআপ
-          VBoxManage storagectl "AndroidVM" --name "SATA" --add sata
-          VBoxManage storageattach "AndroidVM" --storagectl "SATA" --port 0 --device 0 --type dvddrive --medium android.iso
-          
-          # পাসওয়ার্ড সেটআপ (android123)
-          VBoxManage modifyvm "AndroidVM" --vrde on --vrdeport 5900 --vrdeaddress 0.0.0.0
-          VBoxManage modifyvm "AndroidVM" --vrdeauthlibrary "VBoxAuthSimple"
-          VBoxManage setextradata "AndroidVM" "VBoxInternal/Devices/VMMDev/0/Config/VBoxAuthSimple/Users/runner" $(openssl passwd -crypt android123)
+          # Docker-based Android container start korbe
+          # Etate built-in VNC thake ebong password-o set kora jay
+          docker run -d -p 5900:5900 \
+            --privileged \
+            -e VNC_PASSWORD=android123 \
+            -e DEVICE="Samsung Galaxy S10" \
+            budtmo/docker-android-x86-9.0
 
-      - name: ⚡ Auto-Launch & Interaction
+      - name: 🔒 Connection Info
         run: |
-          VBoxManage startvm "AndroidVM" --type headless
-          
-          echo "বুট মেনুর জন্য ১৫ সেকেন্ড অপেক্ষা করছি..."
-          sleep 15
-          
-          # অটোমেটিক 'Enter' প্রেস করা
-          VBoxManage controlvm "AndroidVM" keyboardputscancode 1c 9c
+          # Container load hote 2-3 minute somoy dey
+          echo "Waiting for Docker Android to initialize..."
+          sleep 120
           
           TS_IP=$(tailscale ip -4)
           echo "=========================================="
-          echo "✅ অ্যান্ড্রয়েড চালু হচ্ছে!"
+          echo "✅ ANDROID IS READY (DOCKER MODE)"
           echo "🌐 IP: $TS_IP"
           echo "🔌 Port: 5900"
-          echo "👤 User: runner"
           echo "🔑 Pass: android123"
           echo "=========================================="
           
-          # সেশনটি ১ ঘণ্টা চালু থাকবে
-          for i in {1..60}; do
-            echo "বুট হতে সময় লাগতে পারে... মিনিট: $i"
-            sleep 60
-          done
+          # Runner-ke 1 ghonta active rakhar jonno
+          sleep 3600
           
