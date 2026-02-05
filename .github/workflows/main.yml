@@ -1,4 +1,4 @@
-name: Android Remote VNC (Fixed Path)
+name: Android Remote VNC (Visible Version)
 on: workflow_dispatch
 
 jobs:
@@ -16,25 +16,24 @@ jobs:
       - name: 🛠️ Install VNC & Window Manager
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb x11vnc fluxbox
+          # added 'wmctrl' to force the emulator window to focus/maximize
+          sudo apt-get install -y xvfb x11vnc fluxbox wmctrl 
 
       - name: 📱 Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: ⚡ Launch Emulator
+      - name: ⚡ Launch Emulator & Desktop
         run: |
-          # Define paths clearly to avoid "command not found"
           SDK_MANAGER=$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
           AVD_MANAGER=$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager
           EMULATOR=$ANDROID_HOME/emulator/emulator
           
-          # If 'latest' doesn't exist, fallback to tools/bin
           if [ ! -f "$SDK_MANAGER" ]; then
             SDK_MANAGER=$ANDROID_HOME/tools/bin/sdkmanager
             AVD_MANAGER=$ANDROID_HOME/tools/bin/avdmanager
           fi
 
-          # 1. Install System Image (Android 10 x86_64)
+          # 1. Install System Image
           $SDK_MANAGER "system-images;android-29;default;x86_64"
           echo "no" | $AVD_MANAGER create avd -n fast_emu -k "system-images;android-29;default;x86_64" --force
           
@@ -44,20 +43,26 @@ jobs:
           sleep 2
           fluxbox & 
 
-          # 3. Launch Android
+          # 3. Launch Android with "Visible" flags
+          # We remove -no-window so it actually renders to Xvfb
           $EMULATOR -avd fast_emu \
             -no-audio \
             -no-boot-anim \
             -accel on \
             -gpu swiftshader_indirect \
             -no-snapshot \
+            -screen touch \
             -memory 2048 &
+          
+          # 4. Wait for the window to appear and maximize it
+          echo "Waiting for Emulator window..."
+          sleep 10
+          wmctrl -r "Android Emulator" -e 0,0,0,1280,720 || true
 
       - name: 🔒 Start VNC & Show Credentials
         run: |
           mkdir -p ~/.vnc
           x11vnc -storepasswd "android123" ~/.vnc/passwd
-          
           export DISPLAY=:99
           x11vnc -rfbauth ~/.vnc/passwd -display :99 -forever -bg -rfbport 5900
           
@@ -70,8 +75,14 @@ jobs:
           echo "  🔑 PASSWORD   : android123"
           echo "  🔌 PORT       : 5900"
           echo "=========================================="
-          echo "Connect using: vncviewer $TS_IP:5900"
           
-          # Keep alive for 1 hour
+          # Wait until Android is fully booted before finishing the log
+          echo "Waiting for Android to reach Home Screen..."
+          $ANDROID_HOME/platform-tools/adb wait-for-device
+          while [ "$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed | tr -d '\r')" != "1" ]; do
+            sleep 5
+          done
+          echo "✅ BOOT COMPLETED! You can now use the UI."
+          
           sleep 3600
           
