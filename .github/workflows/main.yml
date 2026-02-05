@@ -1,0 +1,76 @@
+name: Android Remote VNC (Tailscale)
+on: 
+  workflow_dispatch: # Allows you to start it manually
+
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    # Hardware acceleration is now available on standard GitHub runners (April 2024 update)
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🌐 Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: 🛠️ Install VNC and Desktop Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11vnc fluxbox
+
+      - name: 📱 Setup Android SDK & Emulator
+        uses: android-actions/setup-android@v3
+
+      - name: ⚡ Launch Fast Emulator
+        run: |
+          # 1. Download a lightweight x86_64 image (Android 10/API 29 is fastest)
+          sdkmanager "system-images;android-29;default;x86_64"
+          echo "no" | avdmanager create avd -n fast_vnc_emu -k "system-images;android-29;default;x86_64" --force
+          
+          # 2. Start Virtual Display (16-bit color for VNC speed)
+          Xvfb :99 -screen 0 1280x720x16 &
+          export DISPLAY=:99
+          fluxbox & # Basic window manager to wrap the emulator
+
+          # 3. Launch Emulator with performance flags
+          $ANDROID_HOME/emulator/emulator -avd fast_vnc_emu \
+            -no-audio \
+            -no-boot-anim \
+            -accel on \
+            -gpu swiftshader_indirect \
+            -no-snapshot \
+            -memory 3072 &
+
+      - name: 🔒 Start VNC Server
+        run: |
+          mkdir -p ~/.vnc
+          x11vnc -storepasswd "fastvnc" ~/.vnc/passwd
+          export DISPLAY=:99
+          # Run x11vnc in background on port 5900
+          x11vnc -rfbauth ~/.vnc/passwd -display :99 -forever -bg -rfbport 5900
+
+      - name: 🚀 Connection Dashboard
+        run: |
+          TS_IP=$(tailscale ip -4)
+          echo "===================================================="
+          echo "      📱 ANDROID EMULATOR IS READY"
+          echo "===================================================="
+          echo "  🌐 TAILSCALE IP : $TS_IP"
+          echo "  👤 USERNAME     : runner"
+          echo "  🔑 VNC PASSWORD : fastvnc"
+          echo "  🔌 VNC PORT     : 5900"
+          echo "----------------------------------------------------"
+          echo "  STEP-BY-STEP CONNECTION:"
+          echo "  1. Open your VNC Viewer (RealVNC/TigerVNC)"
+          echo "  2. Connect to address: $TS_IP:5900"
+          echo "  3. Enter password: fastvnc"
+          echo "===================================================="
+          
+          # Keep the action alive for 1 hour
+          echo "Keep-alive: Action will stay open for 60 minutes."
+          sleep 3600
+          
