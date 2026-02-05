@@ -1,4 +1,4 @@
-name: Android Remote VNC (Auth Key)
+name: Android Remote VNC (Fixed Path)
 on: workflow_dispatch
 
 jobs:
@@ -8,49 +8,70 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 🌐 Connect Tailscale (Auth Key)
+      - name: 🌐 Connect Tailscale
         uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
 
-      - name: 🛠️ Install Tools
+      - name: 🛠️ Install VNC & Window Manager
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb x11vnc fluxbox
 
-      - name: 📱 Setup & Launch Emulator
+      - name: 📱 Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: ⚡ Launch Emulator
         run: |
-          # Setup SDK
-          sdkmanager "system-images;android-29;default;x86_64"
-          echo "no" | avdmanager create avd -n fast_emu -k "system-images;android-29;default;x86_64" --force
+          # Define paths clearly to avoid "command not found"
+          SDK_MANAGER=$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
+          AVD_MANAGER=$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager
+          EMULATOR=$ANDROID_HOME/emulator/emulator
           
-          # Start Virtual Screen
+          # If 'latest' doesn't exist, fallback to tools/bin
+          if [ ! -f "$SDK_MANAGER" ]; then
+            SDK_MANAGER=$ANDROID_HOME/tools/bin/sdkmanager
+            AVD_MANAGER=$ANDROID_HOME/tools/bin/avdmanager
+          fi
+
+          # 1. Install System Image (Android 10 x86_64)
+          $SDK_MANAGER "system-images;android-29;default;x86_64"
+          echo "no" | $AVD_MANAGER create avd -n fast_emu -k "system-images;android-29;default;x86_64" --force
+          
+          # 2. Start Virtual Display
           Xvfb :99 -screen 0 1280x720x16 &
           export DISPLAY=:99
+          sleep 2
           fluxbox & 
 
-          # Launch Android (The 'fast' way)
-          $ANDROID_HOME/emulator/emulator -avd fast_emu \
-            -no-audio -no-boot-anim -accel on -gpu swiftshader_indirect -memory 2048 &
+          # 3. Launch Android
+          $EMULATOR -avd fast_emu \
+            -no-audio \
+            -no-boot-anim \
+            -accel on \
+            -gpu swiftshader_indirect \
+            -no-snapshot \
+            -memory 2048 &
 
       - name: 🔒 Start VNC & Show Credentials
         run: |
-          # Set VNC Password
           mkdir -p ~/.vnc
           x11vnc -storepasswd "android123" ~/.vnc/passwd
           
-          # Start Server
           export DISPLAY=:99
           x11vnc -rfbauth ~/.vnc/passwd -display :99 -forever -bg -rfbport 5900
           
-          # Get Connection Info
           TS_IP=$(tailscale ip -4)
           echo "=========================================="
-          echo "  IP ADDRESS : $TS_IP"
-          echo "  USERNAME   : runner"
-          echo "  PASSWORD   : android123"
-          echo "  PORT       : 5900"
+          echo "🚀 CONNECTION DASHBOARD"
           echo "=========================================="
+          echo "  🌐 IP ADDRESS : $TS_IP"
+          echo "  👤 USERNAME   : runner"
+          echo "  🔑 PASSWORD   : android123"
+          echo "  🔌 PORT       : 5900"
+          echo "=========================================="
+          echo "Connect using: vncviewer $TS_IP:5900"
           
-          # Stay alive
+          # Keep alive for 1 hour
           sleep 3600
+          
