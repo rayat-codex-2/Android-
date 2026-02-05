@@ -1,55 +1,53 @@
-name: Ubuntu VirtualBox Android
+name: Auto-Boot Android VBox (Password Protected)
 on: workflow_dispatch
 
 jobs:
-  run-vbox:
-    runs-on: ubuntu-latest
+  android:
+    runs-on: macos-13 # Required for Intel-based VirtualBox support
     steps:
-      - name: 🌐 Connect Tailscale
-        uses: tailscale/github-action@v2
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-
-      - name: 🛠️ Install VirtualBox & VNC Tools
+      - name: 🌐 Tailscale Connect
         run: |
-          sudo apt-get update
-          sudo apt-get install -y virtualbox xvfb x11vnc fluxbox wmctrl
+          brew install tailscale
+          sudo tailscaled --tun=userspace-networking &
+          sleep 5
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-auto-android
 
-      - name: 💿 Download Android ISO
+      - name: 💿 Download & Prep
         run: |
-          # SourceForge is more stable for GitHub Runners
           curl -L -o android.iso "https://sourceforge.net/projects/android-x86/files/Release%209.0/android-x86_64-9.0-r2.iso/download"
-
-      - name: 🏗️ Setup VirtualBox VM
-        run: |
-          # 1. Create VM
-          vboxmanage createvm --name "AndroidVM" --ostype "Linux26_64" --register
-          vboxmanage modifyvm "AndroidVM" --memory 2048 --vram 128 --graphicscontroller vmsvga --nic1 nat
           
-          # 2. Attach ISO
-          vboxmanage storagectl "AndroidVM" --name "SATA" --add sata
-          vboxmanage storageattach "AndroidVM" --storagectl "SATA" --port 0 --device 0 --type dvddrive --medium android.iso
+          VBoxManage createvm --name "AndroidVM" --ostype "Linux26_64" --register
+          VBoxManage modifyvm "AndroidVM" --memory 3072 --vram 128 --graphicscontroller vmsvga --nic1 nat
+          VBoxManage storagectl "AndroidVM" --name "SATA" --add sata
+          VBoxManage storageattach "AndroidVM" --storagectl "SATA" --port 0 --device 0 --type dvddrive --medium android.iso
           
-          # 3. Enable Remote Display (VRDE)
-          vboxmanage modifyvm "AndroidVM" --vrde on --vrdeport 5900 --vrdeaddress 0.0.0.0
+          # Enable VNC/Remote Display with Password
+          VBoxManage modifyvm "AndroidVM" --vrde on --vrdeport 5900 --vrdeaddress 0.0.0.0
+          VBoxManage modifyvm "AndroidVM" --vrdeauthlibrary "VBoxAuthSimple"
+          VBoxManage setextradata "AndroidVM" "VBoxInternal/Devices/VMMDev/0/Config/VBoxAuthSimple/Users/runner" $(openssl passwd -crypt android123)
 
-      - name: ⚡ Launch & Connect Info
+      - name: ⚡ Auto-Launch
         run: |
-          # Start VirtualBox in Headless mode
-          vboxmanage startvm "AndroidVM" --type headless
+          VBoxManage startvm "AndroidVM" --type headless
+          
+          echo "Waiting 15 seconds for boot menu..."
+          sleep 15
+          
+          # Automatically select 'Live CD' by sending 'Enter' key
+          VBoxManage controlvm "AndroidVM" keyboardputscancode 1c 9c
           
           TS_IP=$(tailscale ip -4)
           echo "=========================================="
-          echo "🚀 VIRTUALBOX STARTED"
-          echo "=========================================="
-          echo "  🌐 IP: $TS_IP"
-          echo "  🔌 PORT: 5900"
-          echo "  🔑 PASS: (None)"
-          echo "=========================================="
-          echo "  IMPORTANT: Once you connect, use your"
-          echo "  VNC keyboard to select 'Live CD' and"
-          echo "  press ENTER. It will take 5 mins to load."
+          echo "✅ AUTO-BOOT STARTED WITH PASSWORD"
+          echo "🌐 IP: $TS_IP"
+          echo "🔌 PORT: 5900"
+          echo "👤 USER: runner"
+          echo "🔑 PASS: android123"
           echo "=========================================="
           
-          # Keep alive for 1 hour
-          sleep 3600
+          # Prevent runner timeout
+          for i in {1..60}; do
+            echo "Session active: Minute $i"
+            sleep 60
+          done
+          
