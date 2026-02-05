@@ -1,9 +1,12 @@
-name: Android Remote VNC (Phone Optimized)
+name: Android Remote VNC (Path Fixed)
 on: workflow_dispatch
 
 jobs:
   emulator:
     runs-on: ubuntu-latest
+    env:
+      # This fixes the "Unknown AVD name" error
+      ANDROID_AVD_HOME: /home/runner/.android/avd
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,37 +26,42 @@ jobs:
 
       - name: ⚡ Launch Visible Emulator
         run: |
-          # 1. Paths
+          # 1. Define Paths
           SDK_MANAGER=$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
           AVD_MANAGER=$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager
           EMULATOR=$ANDROID_HOME/emulator/emulator
           
+          # Fallback if 'latest' isn't there
           if [ ! -f "$SDK_MANAGER" ]; then
             SDK_MANAGER=$ANDROID_HOME/tools/bin/sdkmanager
             AVD_MANAGER=$ANDROID_HOME/tools/bin/avdmanager
           fi
 
-          # 2. Use Android 9 (API 28) - It is much more stable on GitHub Actions
+          # 2. Cleanup & Directory Prep
+          mkdir -p $ANDROID_AVD_HOME
+          rm -rf $ANDROID_AVD_HOME/phone_emu*
+
+          # 3. Install Android 9 System Image
           $SDK_MANAGER "system-images;android-28;default;x86_64"
           echo "no" | $AVD_MANAGER create avd -n phone_emu -k "system-images;android-28;default;x86_64" --force
           
-          # 3. Setup Virtual Screen (Standard Phone Aspect Ratio)
+          # 4. Start Virtual Screen (Phone Ratio)
           Xvfb :99 -screen 0 720x1280x16 &
           export DISPLAY=:99
           sleep 3
           fluxbox & 
 
-          # 4. Launch with "Guest" rendering (Slow but guaranteed to show up)
+          # 5. Launch Emulator with Path Variable set
+          # Using 'guest' GPU for maximum compatibility on your phone viewer
           $EMULATOR -avd phone_emu \
             -no-audio \
             -no-boot-anim \
             -gpu guest \
             -no-snapshot \
-            -memory 2048 \
-            -qemu -m 2048 &
+            -memory 2048 &
           
-          # 5. Force window to front
-          sleep 15
+          # 6. Wait for window to exist and move it into view
+          sleep 20
           wmctrl -r "Android Emulator" -e 0,0,0,720,1280 || true
 
       - name: 🔒 Start VNC & Connection Info
@@ -65,15 +73,23 @@ jobs:
           
           TS_IP=$(tailscale ip -4)
           echo "=========================================="
-          echo "🌐 IP: $TS_IP"
-          echo "🔑 PASS: android123"
+          echo "🌐 CONNECT NOW"
+          echo "=========================================="
+          echo "  IP: $TS_IP"
+          echo "  PORT: 5900"
+          echo "  PASS: android123"
           echo "=========================================="
           
-          # Wait for Android to actually finish loading
+          # Real-time boot tracker
+          echo "Waiting for Android system to start..."
           $ANDROID_HOME/platform-tools/adb wait-for-device
-          echo "Device found! Waiting for UI..."
-          sleep 60
-          echo "The screen should no longer be black/empty."
           
+          # This loop stays active until the Android Home Screen is ready
+          until [[ "$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed | tr -d '\r')" == "1" ]]; do
+            echo "Still booting..."
+            sleep 10
+          done
+          
+          echo "✅ BOOT COMPLETE! Open your VNC app now."
           sleep 3600
           
