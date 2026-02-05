@@ -1,95 +1,66 @@
-name: Android Remote VNC (Path Fixed)
+name: Android Fix - Final
 on: workflow_dispatch
 
 jobs:
-  emulator:
+  run-android:
     runs-on: ubuntu-latest
     env:
-      # This fixes the "Unknown AVD name" error
-      ANDROID_AVD_HOME: /home/runner/.android/avd
+      ANDROID_AVD_HOME: /home/runner/.android/avd # Forces tools to find the device
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: 🌐 Connect Tailscale
         uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
 
-      - name: 🛠️ Install VNC & Display Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb x11vnc fluxbox wmctrl
+      - name: 🛠️ Install Ubuntu Desktop Tools
+        run: sudo apt-get update && sudo apt-get install -y xvfb x11vnc fluxbox wmctrl
 
-      - name: 📱 Setup Android SDK
+      - name: 📱 Setup SDK
         uses: android-actions/setup-android@v3
 
-      - name: ⚡ Launch Visible Emulator
+      - name: ⚡ Build & Launch Android
         run: |
-          # 1. Define Paths
-          SDK_MANAGER=$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
-          AVD_MANAGER=$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager
-          EMULATOR=$ANDROID_HOME/emulator/emulator
-          
-          # Fallback if 'latest' isn't there
-          if [ ! -f "$SDK_MANAGER" ]; then
-            SDK_MANAGER=$ANDROID_HOME/tools/bin/sdkmanager
-            AVD_MANAGER=$ANDROID_HOME/tools/bin/avdmanager
-          fi
-
-          # 2. Cleanup & Directory Prep
+          # 1. Force directories
           mkdir -p $ANDROID_AVD_HOME
-          rm -rf $ANDROID_AVD_HOME/phone_emu*
-
-          # 3. Install Android 9 System Image
-          $SDK_MANAGER "system-images;android-28;default;x86_64"
-          echo "no" | $AVD_MANAGER create avd -n phone_emu -k "system-images;android-28;default;x86_64" --force
           
-          # 4. Start Virtual Screen (Phone Ratio)
+          # 2. Use Android 9 (API 28) - fastest/most stable for cloud
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "system-images;android-28;default;x86_64"
+          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n vbox_style -k "system-images;android-28;default;x86_64" --force
+          
+          # 3. Start Display
           Xvfb :99 -screen 0 720x1280x16 &
           export DISPLAY=:99
-          sleep 3
-          fluxbox & 
+          sleep 5
+          fluxbox &
 
-          # 5. Launch Emulator with Path Variable set
-          # Using 'guest' GPU for maximum compatibility on your phone viewer
-          $EMULATOR -avd phone_emu \
+          # 4. Launch with Cloud-Safe Graphics
+          $ANDROID_HOME/emulator/emulator -avd vbox_style \
             -no-audio \
             -no-boot-anim \
-            -gpu guest \
+            -gpu swiftshader_indirect \
             -no-snapshot \
             -memory 2048 &
-          
-          # 6. Wait for window to exist and move it into view
-          sleep 20
+
+          # 5. Wait for the window to appear and bring it to front
+          sleep 30
           wmctrl -r "Android Emulator" -e 0,0,0,720,1280 || true
 
-      - name: 🔒 Start VNC & Connection Info
+      - name: 🔒 VNC Connect
         run: |
           mkdir -p ~/.vnc
           x11vnc -storepasswd "android123" ~/.vnc/passwd
           export DISPLAY=:99
           x11vnc -rfbauth ~/.vnc/passwd -display :99 -forever -bg -rfbport 5900
           
-          TS_IP=$(tailscale ip -4)
           echo "=========================================="
-          echo "🌐 CONNECT NOW"
-          echo "=========================================="
-          echo "  IP: $TS_IP"
-          echo "  PORT: 5900"
+          echo "  IP: $(tailscale ip -4)"
           echo "  PASS: android123"
           echo "=========================================="
           
-          # Real-time boot tracker
-          echo "Waiting for Android system to start..."
+          # Check boot status via ADB
           $ANDROID_HOME/platform-tools/adb wait-for-device
-          
-          # This loop stays active until the Android Home Screen is ready
-          until [[ "$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed | tr -d '\r')" == "1" ]]; do
-            echo "Still booting..."
-            sleep 10
-          done
-          
-          echo "✅ BOOT COMPLETE! Open your VNC app now."
+          echo "Device detected. Loading Home Screen..."
+          sleep 60 # Give the UI time to draw
           sleep 3600
-          
