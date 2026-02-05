@@ -1,47 +1,52 @@
-name: 0
+name: Android VBox (Tailscale + Pass)
 on: workflow_dispatch
 
 jobs:
   android:
-    runs-on: macos-13 # VirtualBox-এর জন্য Intel Mac প্রয়োজন
+    runs-on: macos-13 # VirtualBox-এর জন্য এটিই সবচেয়ে স্টেবল রানার
     steps:
       - name: 🌐 Connect Tailscale
         run: |
           brew install tailscale
           sudo tailscaled --tun=userspace-networking &
           sleep 5
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-android-pass --reset
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-android-final --reset
 
       - name: 💿 Setup VM with Password
         run: |
+          # ISO ডাউনলোড
           curl -L -o android.iso "https://sourceforge.net/projects/android-x86/files/Release%209.0/android-x86_64-9.0-r2.iso/download"
           
+          # VM তৈরি ও কনফিগারেশন
           VBoxManage createvm --name "AndroidVM" --ostype "Linux26_64" --register
           VBoxManage modifyvm "AndroidVM" --memory 3072 --vram 128 --graphicscontroller vmsvga --nic1 nat
           VBoxManage storagectl "AndroidVM" --name "SATA" --add sata
           VBoxManage storageattach "AndroidVM" --storagectl "SATA" --port 0 --device 0 --type dvddrive --medium android.iso
           
-          # পাসওয়ার্ড সেটআপ (android123)
+          # VNC/VRDE পাসওয়ার্ড সেটআপ (android123)
           VBoxManage modifyvm "AndroidVM" --vrde on --vrdeport 5900 --vrdeaddress 0.0.0.0
           VBoxManage modifyvm "AndroidVM" --vrdeauthlibrary "VBoxAuthSimple"
-          # openssl ব্যবহার করে পাসওয়ার্ডটি এনক্রিপ্ট করে সেট করা হয়েছে
           VBoxManage setextradata "AndroidVM" "VBoxInternal/Devices/VMMDev/0/Config/VBoxAuthSimple/Users/runner" $(openssl passwd -crypt android123)
 
-      - name: ⚡ Auto-Start
+      - name: ⚡ Auto-Start & Keep Alive
         run: |
           VBoxManage startvm "AndroidVM" --type headless
-          sleep 15
-          # অটোমেটিক এন্টার প্রেস করে বুট মেনু স্কিপ করা
+          
+          # বুট মেনু অটো-স্কিপ করার জন্য এন্টার প্রেস
+          sleep 20
           VBoxManage controlvm "AndroidVM" keyboardputscancode 1c 9c
           
+          TS_IP=$(tailscale ip -4)
           echo "=========================================="
-          echo "🌐 IP: $(tailscale ip -4)"
+          echo "🌐 TAILSCALE IP: $TS_IP"
           echo "👤 USER: runner"
           echo "🔑 PASS: android123"
           echo "🔌 PORT: 5900"
           echo "=========================================="
           
+          # সেশনটি ১ ঘণ্টা চালু রাখা
           for i in {1..60}; do
-            echo "Session Active... Minute $i"
+            echo "বুট হচ্ছে... মিনিট: $i"
             sleep 60
           done
+          
