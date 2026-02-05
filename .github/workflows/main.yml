@@ -1,57 +1,52 @@
-name: macOS VirtualBox Android (Tailscale AuthKey)
+name: macOS VirtualBox Android (Fixed)
 on: workflow_dispatch
 
 jobs:
   android-vbox:
-    runs-on: macos-latest
+    runs-on: macos-13  # Must use Intel-based macOS for VirtualBox
     steps:
-      - name: 🌐 Connect Tailscale (Manual Setup)
+      - name: 🌐 Manual Tailscale Setup
         run: |
-          # 1. Install Tailscale
+          # Install Tailscale via Brew to bypass the Linux-only action check
           brew install tailscale
-          
-          # 2. Start Tailscale background service
           sudo tailscaled --tun=userspace-networking &
           sleep 5
-          
-          # 3. Authenticate with AuthKey
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-macos-android
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-macos-vbox
 
-      - name: 💿 Download Android ISO & Prep VirtualBox
+      - name: 💿 Download Android ISO (SourceForge Mirror)
         run: |
-          # Download a lightweight Android-x86 ISO
-          curl -L -o android.iso https://osdn.net/projects/android-x86/downloads/71931/android-x86_64-9.0-r2.iso/
-          
-          # Create VM
+          # Using SourceForge as OSDN is currently unreliable
+          curl -L -o android.iso "https://sourceforge.net/projects/android-x86/files/Release%209.0/android-x86_64-9.0-r2.iso/download"
+
+      - name: 🏗️ Setup VirtualBox VM
+        run: |
+          # Create and configure the VM
           VBoxManage createvm --name "AndroidVM" --ostype "Linux26_64" --register
-          VBoxManage modifyvm "AndroidVM" --memory 2048 --vram 128 --nic1 nat --graphicscontroller vmsvga
+          VBoxManage modifyvm "AndroidVM" --memory 3072 --vram 128 --nic1 nat --graphicscontroller vmsvga
           
-          # Attach ISO
+          # Attach Storage
           VBoxManage storagectl "AndroidVM" --name "SATA" --add sata
           VBoxManage storageattach "AndroidVM" --storagectl "SATA" --port 0 --device 0 --type dvddrive --medium android.iso
           
-          # Enable Remote Display (VRDE) for VNC
-          # VRDE typically uses RDP protocols, so we bridge it to VNC port 5900
+          # Enable Remote Desktop (VRDE) on Port 5900
           VBoxManage modifyvm "AndroidVM" --vrde on --vrdeport 5900 --vrdeaddress 0.0.0.0
 
       - name: 🚀 Launch & Connection Info
         run: |
-          # Start VM in headless mode (no window on server)
           VBoxManage startvm "AndroidVM" --type headless
           
-          # Get the Tailscale IP
           TS_IP=$(tailscale ip -4)
-          
           echo "===================================================="
           echo "🌐 TAILSCALE IP: $TS_IP"
           echo "🔌 PORT: 5900"
-          echo "🔑 NO PASSWORD SET (Leave blank or try 'android')"
+          echo "🔑 PASSWORD: (None/Blank)"
           echo "===================================================="
-          echo "⚠️  ON FIRST CONNECT:"
-          echo "You will see a Boot Menu. Use your VNC keyboard to"
-          echo "select 'Live CD - Run Android-x86 without installation'"
+          echo "⚠️  STEPS TO SEE ANDROID:"
+          echo "1. Connect your VNC/RDP app to $TS_IP:5900"
+          echo "2. You will see a Boot Menu."
+          echo "3. Use your keyboard to select 'Live CD - Run Android-x86'"
+          echo "4. Wait 5-10 minutes for it to boot."
           echo "===================================================="
           
-          # Keep alive for 1 hour
           sleep 3600
           
