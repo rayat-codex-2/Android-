@@ -1,52 +1,47 @@
-name: macOS VirtualBox Android (Fixed)
+name: Stable macOS Android
 on: workflow_dispatch
 
 jobs:
   android-vbox:
-    runs-on: macos-13  # Must use Intel-based macOS for VirtualBox
+    runs-on: macos-13
+    timeout-minutes: 60  # Prevents early auto-cancellation
     steps:
-      - name: 🌐 Manual Tailscale Setup
+      - name: 🌐 Tailscale (Manual & Verified)
+        continue-on-error: true  # If Tailscale fails, the job won't stop immediately
         run: |
-          # Install Tailscale via Brew to bypass the Linux-only action check
           brew install tailscale
           sudo tailscaled --tun=userspace-networking &
-          sleep 5
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-macos-vbox
+          sleep 10
+          # We use --reset to clear any old sessions that cause crashes
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --reset --hostname=gh-mac-vbox
 
-      - name: 💿 Download Android ISO (SourceForge Mirror)
+      - name: 💿 Download Android (SourceForge)
         run: |
-          # Using SourceForge as OSDN is currently unreliable
           curl -L -o android.iso "https://sourceforge.net/projects/android-x86/files/Release%209.0/android-x86_64-9.0-r2.iso/download"
 
-      - name: 🏗️ Setup VirtualBox VM
+      - name: 🏗️ Setup VM (Low Memory Mode)
         run: |
-          # Create and configure the VM
           VBoxManage createvm --name "AndroidVM" --ostype "Linux26_64" --register
-          VBoxManage modifyvm "AndroidVM" --memory 3072 --vram 128 --nic1 nat --graphicscontroller vmsvga
+          # Reduced to 2048MB to prevent the runner from crashing/canceling
+          VBoxManage modifyvm "AndroidVM" --memory 2048 --vram 128 --nic1 nat --graphicscontroller vmsvga
           
-          # Attach Storage
           VBoxManage storagectl "AndroidVM" --name "SATA" --add sata
           VBoxManage storageattach "AndroidVM" --storagectl "SATA" --port 0 --device 0 --type dvddrive --medium android.iso
           
-          # Enable Remote Desktop (VRDE) on Port 5900
           VBoxManage modifyvm "AndroidVM" --vrde on --vrdeport 5900 --vrdeaddress 0.0.0.0
 
-      - name: 🚀 Launch & Connection Info
+      - name: 🚀 Launch & Keep Alive
         run: |
           VBoxManage startvm "AndroidVM" --type headless
           
-          TS_IP=$(tailscale ip -4)
-          echo "===================================================="
+          TS_IP=$(tailscale ip -4 || echo "IP_NOT_FOUND")
+          echo "=========================================="
           echo "🌐 TAILSCALE IP: $TS_IP"
           echo "🔌 PORT: 5900"
-          echo "🔑 PASSWORD: (None/Blank)"
-          echo "===================================================="
-          echo "⚠️  STEPS TO SEE ANDROID:"
-          echo "1. Connect your VNC/RDP app to $TS_IP:5900"
-          echo "2. You will see a Boot Menu."
-          echo "3. Use your keyboard to select 'Live CD - Run Android-x86'"
-          echo "4. Wait 5-10 minutes for it to boot."
-          echo "===================================================="
+          echo "=========================================="
           
-          sleep 3600
-          
+          # This loop prevents GitHub from thinking the job is idle
+          for i in {1..60}; do
+            echo "Runner still active... Minute $i"
+            sleep 360
+          done
