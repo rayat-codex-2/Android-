@@ -1,48 +1,46 @@
-name: GitHub Android Stable
+name: Android 100% Fixed
 on: workflow_dispatch
 
 jobs:
-  run-android:
+  android:
     runs-on: ubuntu-latest
     steps:
       - name: 🌐 Connect Tailscale
         uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          args: --hostname=gh-android-stable
+          args: --hostname=stable-android
 
-      - name: 🛠️ Install Emulator & VNC Tools
+      - name: 🛠️ Install Clean Emulator
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-kvm qemu-system-x86 xvfb x11vnc fluxbox
-
-      - name: 💿 Setup & Auto-Boot Android
+          # Fluxbox এর বদলে আমরা সরাসরি Xvfb ও x11vnc ব্যবহার করব জটিলতা এড়াতে
+          sudo apt-get install -y qemu-kvm qemu-system-x86 xvfb x11vnc
+          
+      - name: 💿 Setup & Auto-Start Android
         run: |
-          # হালকা এবং দ্রুত অ্যান্ড্রয়েড ইমেজ ডাউনলোড
+          # ISO ডাউনলোড
           curl -L -o android.iso "https://sourceforge.net/projects/android-x86/files/Release%209.0/android-x86_64-9.0-r2.iso/download"
           
-          # ভার্চুয়াল স্ক্রিন শুরু করা
+          # ভার্চুয়াল স্ক্রিন সেটআপ (Resolution 1024x768)
           Xvfb :99 -screen 0 1024x768x16 &
           export DISPLAY=:99
-          fluxbox &
           
-          # QEMU দিয়ে অ্যান্ড্রয়েড স্টার্ট (এটি ভার্চুয়াল বক্সের চেয়ে ভালো কাজ করে)
-          qemu-system-x86_64 -m 2048 -cdrom android.iso -boot d -net nic -net user -display x11 &
+          # অ্যান্ড্রয়েড লঞ্চার (QEMU অনেক বেশি স্টেবল GitHub-এ)
+          qemu-system-x86_64 -m 3072 -cdrom android.iso -boot d -net nic -net user -display x11 &
           
-          # ৫৯০০ পোর্টে VNC সার্ভার স্টার্ট এবং পাসওয়ার্ড সেটআপ
+          # VNC সার্ভার শুরু করা (পাসওয়ার্ড: android123)
           mkdir -p ~/.vnc
           x11vnc -storepasswd "android123" ~/.vnc/passwd
           x11vnc -rfbauth ~/.vnc/passwd -display :99 -forever -bg -rfbport 5900
-
-      - name: 🔑 Connection Info
-        run: |
-          echo "=========================================="
-          echo "✅ ANDROID IS NOW LIVE!"
-          echo "🌐 IP: $(tailscale ip -4)"
-          echo "🔌 Port: 5900"
-          echo "🔑 Password: android123"
-          echo "=========================================="
-          echo "💡 কানেক্ট করার পর ৫ সেকেন্ড অপেক্ষা করে ENTER চাপুন।"
           
-          # সেশন চালু রাখার জন্য
+          TS_IP=$(tailscale ip -4)
+          echo "=========================================="
+          echo "✅ সেশন সফলভাবে শুরু হয়েছে!"
+          echo "🌐 IP: $TS_IP"
+          echo "🔑 PASS: android123"
+          echo "🔌 PORT: 5900"
+          echo "=========================================="
+          
+          # বুট হতে সময় দিন এবং সেশন ধরে রাখুন
           sleep 3600
