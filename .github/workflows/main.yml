@@ -1,44 +1,48 @@
-name: Final Direct Android VNC
+name: GitHub Android Stable
 on: workflow_dispatch
 
 jobs:
-  android:
-    runs-on: macos-13 # Standard Ubuntu has no VirtualBox kernel support
+  run-android:
+    runs-on: ubuntu-latest
     steps:
-      - name: 🌐 Tailscale
-        run: |
-          brew install tailscale
-          sudo tailscaled --tun=userspace-networking &
-          sleep 5
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-android-direct --reset
+      - name: 🌐 Connect Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          args: --hostname=gh-android-stable
 
-      - name: 💿 Setup VM
+      - name: 🛠️ Install Emulator & VNC Tools
         run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-kvm qemu-system-x86 xvfb x11vnc fluxbox
+
+      - name: 💿 Setup & Auto-Boot Android
+        run: |
+          # হালকা এবং দ্রুত অ্যান্ড্রয়েড ইমেজ ডাউনলোড
           curl -L -o android.iso "https://sourceforge.net/projects/android-x86/files/Release%209.0/android-x86_64-9.0-r2.iso/download"
-          VBoxManage createvm --name "AndroidVM" --ostype "Linux26_64" --register
-          VBoxManage modifyvm "AndroidVM" --memory 4096 --vram 128 --graphicscontroller vmsvga --nic1 nat
-          VBoxManage storagectl "AndroidVM" --name "SATA" --add sata
-          VBoxManage storageattach "AndroidVM" --storagectl "SATA" --port 0 --device 0 --type dvddrive --medium android.iso
           
-          # DIRECT VNC CONFIG (Bypasses Ubuntu Desktop)
-          VBoxManage modifyvm "AndroidVM" --vrde on --vrdeport 5900 --vrdeaddress 0.0.0.0
-          VBoxManage modifyvm "AndroidVM" --vrdeauthlibrary "VBoxAuthSimple"
-          VBoxManage setextradata "AndroidVM" "VBoxInternal/Devices/VMMDev/0/Config/VBoxAuthSimple/Users/runner" $(openssl passwd -crypt android123)
+          # ভার্চুয়াল স্ক্রিন শুরু করা
+          Xvfb :99 -screen 0 1024x768x16 &
+          export DISPLAY=:99
+          fluxbox &
+          
+          # QEMU দিয়ে অ্যান্ড্রয়েড স্টার্ট (এটি ভার্চুয়াল বক্সের চেয়ে ভালো কাজ করে)
+          qemu-system-x86_64 -m 2048 -cdrom android.iso -boot d -net nic -net user -display x11 &
+          
+          # ৫৯০০ পোর্টে VNC সার্ভার স্টার্ট এবং পাসওয়ার্ড সেটআপ
+          mkdir -p ~/.vnc
+          x11vnc -storepasswd "android123" ~/.vnc/passwd
+          x11vnc -rfbauth ~/.vnc/passwd -display :99 -forever -bg -rfbport 5900
 
-      - name: ⚡ Auto-Launch
+      - name: 🔑 Connection Info
         run: |
-          VBoxManage startvm "AndroidVM" --type headless
-          sleep 20
-          # This sends 'Enter' to select 'Live CD' automatically
-          VBoxManage controlvm "AndroidVM" keyboardputscancode 1c 9c
-          
           echo "=========================================="
+          echo "✅ ANDROID IS NOW LIVE!"
           echo "🌐 IP: $(tailscale ip -4)"
-          echo "👤 USER: runner"
-          echo "🔑 PASS: android123"
+          echo "🔌 Port: 5900"
+          echo "🔑 Password: android123"
           echo "=========================================="
+          echo "💡 কানেক্ট করার পর ৫ সেকেন্ড অপেক্ষা করে ENTER চাপুন।"
           
-          for i in {1..60}; do
-            echo "Keep-alive: Minute $i"
-            sleep 60
-          done
+          # সেশন চালু রাখার জন্য
+          sleep 3600
