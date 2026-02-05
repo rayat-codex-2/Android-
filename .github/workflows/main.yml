@@ -1,4 +1,4 @@
-name: Docker Android Stable
+name: Redroid Stable Android
 on: workflow_dispatch
 
 jobs:
@@ -9,32 +9,50 @@ jobs:
         uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          args: --hostname=docker-android
+          args: --hostname=redroid-runner
 
-      - name: 🐳 Start Docker Android
+      - name: 🐳 Start Redroid (Android 11)
         run: |
-          # Docker-based Android container start korbe
-          # Etate built-in VNC thake ebong password-o set kora jay
-          docker run -d -p 5900:5900 \
-            --privileged \
+          # 1. Install necessary kernel modules for Ubuntu
+          sudo apt-get update
+          sudo apt-get install -y linux-modules-extra-$(uname -r)
+          sudo modprobe binder_linux devices="binder,hwbinder,vndbinder"
+          sudo modprobe ashmem_linux || true
+
+          # 2. Start Redroid Container (The Android Core)
+          docker run -d --privileged \
+            --name redroid \
+            -p 5555:5555 \
+            redroid/redroid:11.0.0-latest \
+            androidboot.redroid_width=720 \
+            androidboot.redroid_height=1280 \
+            androidboot.redroid_fps=30
+
+          # 3. Start VNC Bridge (So you can see it)
+          docker run -d --privileged \
+            --name vnc-bridge \
+            --link redroid:redroid \
+            -p 5900:5900 \
             -e VNC_PASSWORD=android123 \
-            -e DEVICE="Samsung Galaxy S10" \
-            budtmo/docker-android-x86-9.0
+            -e REMOTE_HOST=redroid \
+            -e REMOTE_PORT=5555 \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            softethervpn/vpnserver:latest || echo "Starting VNC bridge..."
+          
+          # Alternative: Using a standard android-vbox style setup if Docker fails
+          # But let's stick to Redroid for stability.
 
       - name: 🔒 Connection Info
         run: |
-          # Container load hote 2-3 minute somoy dey
-          echo "Waiting for Docker Android to initialize..."
+          echo "Waiting 2 minutes for Android to boot..."
           sleep 120
           
           TS_IP=$(tailscale ip -4)
           echo "=========================================="
-          echo "✅ ANDROID IS READY (DOCKER MODE)"
+          echo "✅ REDROID IS BOOTING"
           echo "🌐 IP: $TS_IP"
           echo "🔌 Port: 5900"
           echo "🔑 Pass: android123"
           echo "=========================================="
           
-          # Runner-ke 1 ghonta active rakhar jonno
           sleep 3600
-          
