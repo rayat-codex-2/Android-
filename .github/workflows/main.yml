@@ -1,58 +1,47 @@
-name: Redroid Stable Android
+name: Android VBox (Pass: android123)
 on: workflow_dispatch
 
 jobs:
   android:
-    runs-on: ubuntu-latest
+    runs-on: macos-13 # VirtualBox-এর জন্য Intel Mac প্রয়োজন
     steps:
       - name: 🌐 Connect Tailscale
-        uses: tailscale/github-action@v2
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          args: --hostname=redroid-runner
-
-      - name: 🐳 Start Redroid (Android 11)
         run: |
-          # 1. Install necessary kernel modules for Ubuntu
-          sudo apt-get update
-          sudo apt-get install -y linux-modules-extra-$(uname -r)
-          sudo modprobe binder_linux devices="binder,hwbinder,vndbinder"
-          sudo modprobe ashmem_linux || true
+          brew install tailscale
+          sudo tailscaled --tun=userspace-networking &
+          sleep 5
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-android-pass --reset
 
-          # 2. Start Redroid Container (The Android Core)
-          docker run -d --privileged \
-            --name redroid \
-            -p 5555:5555 \
-            redroid/redroid:11.0.0-latest \
-            androidboot.redroid_width=720 \
-            androidboot.redroid_height=1280 \
-            androidboot.redroid_fps=30
-
-          # 3. Start VNC Bridge (So you can see it)
-          docker run -d --privileged \
-            --name vnc-bridge \
-            --link redroid:redroid \
-            -p 5900:5900 \
-            -e VNC_PASSWORD=android123 \
-            -e REMOTE_HOST=redroid \
-            -e REMOTE_PORT=5555 \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            softethervpn/vpnserver:latest || echo "Starting VNC bridge..."
-          
-          # Alternative: Using a standard android-vbox style setup if Docker fails
-          # But let's stick to Redroid for stability.
-
-      - name: 🔒 Connection Info
+      - name: 💿 Setup VM with Password
         run: |
-          echo "Waiting 2 minutes for Android to boot..."
-          sleep 120
+          curl -L -o android.iso "https://sourceforge.net/projects/android-x86/files/Release%209.0/android-x86_64-9.0-r2.iso/download"
           
-          TS_IP=$(tailscale ip -4)
+          VBoxManage createvm --name "AndroidVM" --ostype "Linux26_64" --register
+          VBoxManage modifyvm "AndroidVM" --memory 3072 --vram 128 --graphicscontroller vmsvga --nic1 nat
+          VBoxManage storagectl "AndroidVM" --name "SATA" --add sata
+          VBoxManage storageattach "AndroidVM" --storagectl "SATA" --port 0 --device 0 --type dvddrive --medium android.iso
+          
+          # পাসওয়ার্ড সেটআপ (android123)
+          VBoxManage modifyvm "AndroidVM" --vrde on --vrdeport 5900 --vrdeaddress 0.0.0.0
+          VBoxManage modifyvm "AndroidVM" --vrdeauthlibrary "VBoxAuthSimple"
+          # openssl ব্যবহার করে পাসওয়ার্ডটি এনক্রিপ্ট করে সেট করা হয়েছে
+          VBoxManage setextradata "AndroidVM" "VBoxInternal/Devices/VMMDev/0/Config/VBoxAuthSimple/Users/runner" $(openssl passwd -crypt android123)
+
+      - name: ⚡ Auto-Start
+        run: |
+          VBoxManage startvm "AndroidVM" --type headless
+          sleep 15
+          # অটোমেটিক এন্টার প্রেস করে বুট মেনু স্কিপ করা
+          VBoxManage controlvm "AndroidVM" keyboardputscancode 1c 9c
+          
           echo "=========================================="
-          echo "✅ REDROID IS BOOTING"
-          echo "🌐 IP: $TS_IP"
-          echo "🔌 Port: 5900"
-          echo "🔑 Pass: android123"
+          echo "🌐 IP: $(tailscale ip -4)"
+          echo "👤 USER: runner"
+          echo "🔑 PASS: android123"
+          echo "🔌 PORT: 5900"
           echo "=========================================="
           
-          sleep 3600
+          for i in {1..60}; do
+            echo "Session Active... Minute $i"
+            sleep 60
+          done
