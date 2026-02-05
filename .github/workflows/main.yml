@@ -1,48 +1,57 @@
-name: Android via VirtualBox
+name: macOS VirtualBox Android (Tailscale AuthKey)
 on: workflow_dispatch
 
 jobs:
-  virtualbox-android:
-    runs-on: macos-latest # Required for VirtualBox support
+  android-vbox:
+    runs-on: macos-latest
     steps:
-      - name: 🌐 Connect Tailscale
-        uses: tailscale/github-action@v2
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-
-      - name: 🛠️ Install VirtualBox & Tools
+      - name: 🌐 Connect Tailscale (Manual Setup)
         run: |
-          # VirtualBox is usually pre-installed on macOS runners, 
-          # but we ensure the command line tools are ready.
-          vboxmanage --version
-
-      - name: 💿 Download Android-x86 ISO
-        run: |
-          curl -L -o android.iso https://osdn.net/projects/android-x86/downloads/71931/android-x86_64-9.0-r2.iso/
-
-      - name: 🏗️ Create VirtualBox VM
-        run: |
-          vboxmanage createvm --name "AndroidVM" --ostype "Linux26_64" --register
-          vboxmanage modifyvm "AndroidVM" --memory 2048 --vram 128 --nic1 nat --graphicscontroller vmsvga
-          vboxmanage storagectl "AndroidVM" --name "SATA" --add sata
-          vboxmanage storageattach "AndroidVM" --storagectl "SATA" --port 0 --device 0 --type dvddrive --medium android.iso
-
-      - name: ⚡ Launch VM
-        run: |
-          vboxmanage startvm "AndroidVM" --type headless
-          echo "VirtualBox VM started in headless mode."
-
-      - name: 🔒 Start VNC Bridge
-        run: |
-          # VirtualBox has a built-in VRDE (Remote Desktop) 
-          # We use a standard VNC server to bridge the macOS display
-          # This part is complex on macOS; often it is easier to use
-          # the standard emulator as it is optimized for this.
+          # 1. Install Tailscale
+          brew install tailscale
           
+          # 2. Start Tailscale background service
+          sudo tailscaled --tun=userspace-networking &
+          sleep 5
+          
+          # 3. Authenticate with AuthKey
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-macos-android
+
+      - name: 💿 Download Android ISO & Prep VirtualBox
+        run: |
+          # Download a lightweight Android-x86 ISO
+          curl -L -o android.iso https://osdn.net/projects/android-x86/downloads/71931/android-x86_64-9.0-r2.iso/
+          
+          # Create VM
+          VBoxManage createvm --name "AndroidVM" --ostype "Linux26_64" --register
+          VBoxManage modifyvm "AndroidVM" --memory 2048 --vram 128 --nic1 nat --graphicscontroller vmsvga
+          
+          # Attach ISO
+          VBoxManage storagectl "AndroidVM" --name "SATA" --add sata
+          VBoxManage storageattach "AndroidVM" --storagectl "SATA" --port 0 --device 0 --type dvddrive --medium android.iso
+          
+          # Enable Remote Display (VRDE) for VNC
+          # VRDE typically uses RDP protocols, so we bridge it to VNC port 5900
+          VBoxManage modifyvm "AndroidVM" --vrde on --vrdeport 5900 --vrdeaddress 0.0.0.0
+
+      - name: 🚀 Launch & Connection Info
+        run: |
+          # Start VM in headless mode (no window on server)
+          VBoxManage startvm "AndroidVM" --type headless
+          
+          # Get the Tailscale IP
           TS_IP=$(tailscale ip -4)
-          echo "=========================================="
-          echo "  VM IP: $TS_IP"
-          echo "  NOTE: macOS runners have no local display."
-          echo "=========================================="
+          
+          echo "===================================================="
+          echo "🌐 TAILSCALE IP: $TS_IP"
+          echo "🔌 PORT: 5900"
+          echo "🔑 NO PASSWORD SET (Leave blank or try 'android')"
+          echo "===================================================="
+          echo "⚠️  ON FIRST CONNECT:"
+          echo "You will see a Boot Menu. Use your VNC keyboard to"
+          echo "select 'Live CD - Run Android-x86 without installation'"
+          echo "===================================================="
+          
+          # Keep alive for 1 hour
           sleep 3600
           
