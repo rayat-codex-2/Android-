@@ -1,53 +1,57 @@
-name: Auto-Boot Android VBox (Password Protected)
+name: Full-Auto Android VBox
 on: workflow_dispatch
 
 jobs:
   android:
-    runs-on: macos-13 # Required for Intel-based VirtualBox support
+    runs-on: macos-13 # VirtualBox-এর জন্য এটিই সবচেয়ে স্টেবল
     steps:
-      - name: 🌐 Tailscale Connect
+      - name: 🌐 Connect Tailscale
         run: |
           brew install tailscale
           sudo tailscaled --tun=userspace-networking &
           sleep 5
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-auto-android
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-android-vbox
 
-      - name: 💿 Download & Prep
+      - name: 💿 Download & Setup VM
         run: |
+          # অ্যান্ড্রয়েড ISO ডাউনলোড
           curl -L -o android.iso "https://sourceforge.net/projects/android-x86/files/Release%209.0/android-x86_64-9.0-r2.iso/download"
           
+          # ভার্চুয়াল বক্স কনফিগারেশন
           VBoxManage createvm --name "AndroidVM" --ostype "Linux26_64" --register
-          VBoxManage modifyvm "AndroidVM" --memory 3072 --vram 128 --graphicscontroller vmsvga --nic1 nat
+          VBoxManage modifyvm "AndroidVM" --memory 4096 --vram 128 --cpus 2 --graphicscontroller vmsvga --nic1 nat
+          
+          # স্টোরেজ এবং পাসওয়ার্ড সেটআপ
           VBoxManage storagectl "AndroidVM" --name "SATA" --add sata
           VBoxManage storageattach "AndroidVM" --storagectl "SATA" --port 0 --device 0 --type dvddrive --medium android.iso
           
-          # Enable VNC/Remote Display with Password
+          # পাসওয়ার্ড সেটআপ (android123)
           VBoxManage modifyvm "AndroidVM" --vrde on --vrdeport 5900 --vrdeaddress 0.0.0.0
           VBoxManage modifyvm "AndroidVM" --vrdeauthlibrary "VBoxAuthSimple"
           VBoxManage setextradata "AndroidVM" "VBoxInternal/Devices/VMMDev/0/Config/VBoxAuthSimple/Users/runner" $(openssl passwd -crypt android123)
 
-      - name: ⚡ Auto-Launch
+      - name: ⚡ Auto-Launch & Interaction
         run: |
           VBoxManage startvm "AndroidVM" --type headless
           
-          echo "Waiting 15 seconds for boot menu..."
+          echo "বুট মেনুর জন্য ১৫ সেকেন্ড অপেক্ষা করছি..."
           sleep 15
           
-          # Automatically select 'Live CD' by sending 'Enter' key
+          # অটোমেটিক 'Enter' প্রেস করা
           VBoxManage controlvm "AndroidVM" keyboardputscancode 1c 9c
           
           TS_IP=$(tailscale ip -4)
           echo "=========================================="
-          echo "✅ AUTO-BOOT STARTED WITH PASSWORD"
+          echo "✅ অ্যান্ড্রয়েড চালু হচ্ছে!"
           echo "🌐 IP: $TS_IP"
-          echo "🔌 PORT: 5900"
-          echo "👤 USER: runner"
-          echo "🔑 PASS: android123"
+          echo "🔌 Port: 5900"
+          echo "👤 User: runner"
+          echo "🔑 Pass: android123"
           echo "=========================================="
           
-          # Prevent runner timeout
+          # সেশনটি ১ ঘণ্টা চালু থাকবে
           for i in {1..60}; do
-            echo "Session active: Minute $i"
+            echo "বুট হতে সময় লাগতে পারে... মিনিট: $i"
             sleep 60
           done
           
