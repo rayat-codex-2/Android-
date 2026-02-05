@@ -1,47 +1,67 @@
-name: Stable macOS Android
+name: Stable Android VNC (Ubuntu)
 on: workflow_dispatch
 
 jobs:
-  android-vbox:
-    runs-on: macos-13
-    timeout-minutes: 60  # Prevents early auto-cancellation
+  run-android:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_AVD_HOME: /home/runner/.android/avd
     steps:
-      - name: 🌐 Tailscale (Manual & Verified)
-        continue-on-error: true  # If Tailscale fails, the job won't stop immediately
-        run: |
-          brew install tailscale
-          sudo tailscaled --tun=userspace-networking &
-          sleep 10
-          # We use --reset to clear any old sessions that cause crashes
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --reset --hostname=gh-mac-vbox
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: 💿 Download Android (SourceForge)
-        run: |
-          curl -L -o android.iso "https://sourceforge.net/projects/android-x86/files/Release%209.0/android-x86_64-9.0-r2.iso/download"
+      - name: 🌐 Connect Tailscale (Step-by-Step Fix)
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          # tags ব্যবহার করলে কানেকশন আরও স্টেবল হয়
+          args: --hostname=ubuntu-android-runner
 
-      - name: 🏗️ Setup VM (Low Memory Mode)
+      - name: 🛠️ Install Desktop Tools
         run: |
-          VBoxManage createvm --name "AndroidVM" --ostype "Linux26_64" --register
-          # Reduced to 2048MB to prevent the runner from crashing/canceling
-          VBoxManage modifyvm "AndroidVM" --memory 2048 --vram 128 --nic1 nat --graphicscontroller vmsvga
-          
-          VBoxManage storagectl "AndroidVM" --name "SATA" --add sata
-          VBoxManage storageattach "AndroidVM" --storagectl "SATA" --port 0 --device 0 --type dvddrive --medium android.iso
-          
-          VBoxManage modifyvm "AndroidVM" --vrde on --vrdeport 5900 --vrdeaddress 0.0.0.0
+          sudo apt-get update
+          # wmctrl এবং x11vnc সঠিক ডিসপ্লের জন্য জরুরি
+          sudo apt-get install -y xvfb x11vnc fluxbox wmctrl
 
-      - name: 🚀 Launch & Keep Alive
+      - name: 📱 Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: ⚡ Launch Fast Android (Software Graphics)
         run: |
-          VBoxManage startvm "AndroidVM" --type headless
+          mkdir -p $ANDROID_AVD_HOME
+          # Android 9 ব্যবহার করা হয়েছে কারণ এটি কম র‍্যামে ভালো চলে
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "system-images;android-28;default;x86_64"
+          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n stable_emu -k "system-images;android-28;default;x86_64" --force
           
-          TS_IP=$(tailscale ip -4 || echo "IP_NOT_FOUND")
+          # ভার্চুয়াল ডিসপ্লে স্টার্ট করা (720x1280 ফোনের জন্য পারফেক্ট)
+          Xvfb :99 -screen 0 720x1280x16 &
+          export DISPLAY=:99
+          sleep 5
+          fluxbox &
+
+          # এমুলেটর রান করা (GPU হিসেবে swiftshader_indirect ব্যবহার করা হয়েছে যা ফেল করবে না)
+          $ANDROID_HOME/emulator/emulator -avd stable_emu \
+            -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -memory 2048 -no-accel & 
+
+      - name: 🔒 VNC Connect & Info
+        run: |
+          # পাসওয়ার্ড সেটআপ
+          mkdir -p ~/.vnc && x11vnc -storepasswd "android123" ~/.vnc/passwd
+          export DISPLAY=:99
+          # VNC সার্ভার স্টার্ট
+          x11vnc -rfbauth ~/.vnc/passwd -display :99 -forever -bg -rfbport 5900
+          
+          # কানেকশন ডিটেইলস প্রিন্ট করা
+          TS_IP=$(tailscale ip -4)
           echo "=========================================="
           echo "🌐 TAILSCALE IP: $TS_IP"
+          echo "👤 USER: runner"
+          echo "🔑 PASS: android123"
           echo "🔌 PORT: 5900"
           echo "=========================================="
           
-          # This loop prevents GitHub from thinking the job is idle
-          for i in {1..60}; do
-            echo "Runner still active... Minute $i"
-            sleep 360
-          done
+          # যতক্ষণ আপনি কানেক্টেড থাকবেন ততক্ষণ অ্যাকশনটি চালু থাকবে
+          echo "অ্যান্ড্রয়েড বুট হতে ২-৩ মিনিট সময় লাগতে পারে..."
+          $ANDROID_HOME/platform-tools/adb wait-for-device
+          sleep 3600
+          
